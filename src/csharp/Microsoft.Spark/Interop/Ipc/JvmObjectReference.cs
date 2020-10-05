@@ -3,8 +3,10 @@
 // See the LICENSE file in the project root for more information.
 
 using System;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Spark.Services;
 
 namespace Microsoft.Spark.Interop.Ipc
@@ -18,6 +20,14 @@ namespace Microsoft.Spark.Interop.Ipc
     {
         private static readonly ILoggerService s_logger =
             LoggerServiceFactory.GetLogger(typeof(JvmObjectId));
+
+        private static readonly BlockingCollection<Action> s_waitingRemoveIdActions =
+            new BlockingCollection<Action>();
+
+        static JvmObjectId()
+        {
+            new Thread(() => StartRemovingIds()).Start();
+        }
 
         /// <summary>
         /// Constructor for JvmObjectId class.
@@ -34,6 +44,10 @@ namespace Microsoft.Spark.Interop.Ipc
         {
             if (!Environment.HasShutdownStarted && (Id != null) && (Jvm != null))
             {
+                //s_waitingRemoveIdActions.Add(RemoveId);
+                //RemoveId();
+
+                //Task.Run(() => RemoveId());
                 ThreadPool.QueueUserWorkItem(_ => RemoveId());
             }
         }
@@ -94,6 +108,17 @@ namespace Microsoft.Spark.Interop.Ipc
             catch (Exception e)
             {
                 s_logger.LogException(e);
+            }
+        }
+
+        private static void StartRemovingIds()
+        {
+            while (true)
+            {
+                if (s_waitingRemoveIdActions.TryTake(out Action removeIdAction, Timeout.Infinite))
+                {
+                    removeIdAction();
+                }
             }
         }
     }

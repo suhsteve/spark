@@ -8,6 +8,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Text;
+using System.Threading;
 using Microsoft.Spark.Network;
 using Microsoft.Spark.Services;
 
@@ -36,6 +37,9 @@ namespace Microsoft.Spark.Interop.Ipc
             LoggerServiceFactory.GetLogger(typeof(JvmBridge));
         private readonly int _portNumber;
 
+        private int _socketsCreated;
+        private int _rmCalled;
+
         internal JvmBridge(int portNumber)
         {
             if (portNumber == 0)
@@ -44,17 +48,22 @@ namespace Microsoft.Spark.Interop.Ipc
             }
 
             _portNumber = portNumber;
+            _socketsCreated = 0;
             _logger.LogInfo($"JvMBridge port is {portNumber}");
         }
 
         private ISocketWrapper GetConnection()
         {
-            if (!_sockets.TryDequeue(out ISocketWrapper socket))
-            {
-                socket = SocketFactory.CreateSocket();
-                socket.Connect(IPAddress.Loopback, _portNumber);
-            }
+            //if (!_sockets.TryDequeue(out ISocketWrapper socket))
+            //{
+            //    Interlocked.Increment(ref _socketsCreated);
+            //    socket = SocketFactory.CreateSocket();
+            //    socket.Connect(IPAddress.Loopback, _portNumber);
+            //}
+            //return socket;
 
+            ISocketWrapper socket = SocketFactory.CreateSocket();
+            socket.Connect(IPAddress.Loopback, _portNumber);
             return socket;
         }
 
@@ -158,8 +167,15 @@ namespace Microsoft.Spark.Interop.Ipc
             ISocketWrapper socket = null;
             try
             {
+                if (methodName == "rm")
+                {
+                    Interlocked.Increment(ref _rmCalled);
+                }
+
+                _logger.LogInfo($"[Socket Queue Size {_sockets.Count}] [Sockets Created {_socketsCreated}] [Rm Called {_rmCalled}] [{classNameOrJvmObjectReference} => {methodName} ({string.Join(",", args)})]");
                 MemoryStream payloadMemoryStream = s_payloadMemoryStream ??= new MemoryStream();
                 payloadMemoryStream.Position = 0;
+                _logger.LogInfo($"PayloadHelper.BuildPayload");
                 PayloadHelper.BuildPayload(
                     payloadMemoryStream,
                     isStatic,
@@ -167,16 +183,21 @@ namespace Microsoft.Spark.Interop.Ipc
                     methodName,
                     args);
 
+                _logger.LogInfo($"GetConnection()");
                 socket = GetConnection();
+                _logger.LogInfo($"ISocketWrapper GetHashCode [{socket.GetHashCode()}] Connected [{socket.InnerSocket.Connected}] IsBound [{socket.InnerSocket.IsBound}]");
 
                 Stream outputStream = socket.OutputStream;
+                _logger.LogInfo($"outputStream.Write isConnected");
                 outputStream.Write(
                     payloadMemoryStream.GetBuffer(),
                     0,
                     (int)payloadMemoryStream.Position);
+                _logger.LogInfo($"outputStream.Flush");
                 outputStream.Flush();
 
                 Stream inputStream = socket.InputStream;
+                _logger.LogInfo($"isMethodCallFailed = SerDe.ReadInt32(inputStream)");
                 int isMethodCallFailed = SerDe.ReadInt32(inputStream);
                 if (isMethodCallFailed != 0)
                 {
@@ -224,7 +245,10 @@ namespace Microsoft.Spark.Interop.Ipc
                                 "Identifier for type 0x{0:X} not supported",
                                 Convert.ToUInt32(typeAsChar)));
                 }
-                _sockets.Enqueue(socket);
+                //_logger.LogInfo($"_sockets.Enqueue(socket);");
+                //_sockets.Enqueue(socket);
+                _logger.LogInfo($"socket.Dispose()");
+                socket.Dispose();
             }
             catch (Exception e)
             {

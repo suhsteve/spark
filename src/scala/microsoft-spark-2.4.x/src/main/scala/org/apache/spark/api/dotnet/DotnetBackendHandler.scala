@@ -25,8 +25,11 @@ class DotnetBackendHandler(server: DotnetBackend)
     with Logging {
 
   override def channelRead0(ctx: ChannelHandlerContext, msg: Array[Byte]): Unit = {
-    val reply = handleBackendRequest(msg)
+      println(s"channelRead0 begin")
+      val reply = handleBackendRequest(msg)
     ctx.write(reply)
+      println(s"channelRead0 end")
+
   }
 
   override def channelReadComplete(ctx: ChannelHandlerContext): Unit = {
@@ -46,6 +49,7 @@ class DotnetBackendHandler(server: DotnetBackend)
     val methodName = readString(dis)
     val numArgs = readInt(dis)
 
+    println(s"handleBackendRequest [$objId => $methodName]")
     if (objId == "DotnetHandler") {
       methodName match {
         case "stopBackend" =>
@@ -85,7 +89,8 @@ class DotnetBackendHandler(server: DotnetBackend)
       handleMethodCall(isStatic, objId, methodName, numArgs, dis, dos)
     }
 
-    bos.toByteArray
+      println(s"handleBackendRequest end")
+      bos.toByteArray
   }
 
   override def exceptionCaught(ctx: ChannelHandlerContext, cause: Throwable): Unit = {
@@ -343,6 +348,7 @@ private object JVMObjectTracker {
 
   def remove(id: String): Option[Object] = {
     synchronized {
+      println("")
       objMap.remove(id)
     }
   }

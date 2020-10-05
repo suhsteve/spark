@@ -3,10 +3,15 @@
 // See the LICENSE file in the project root for more information.
 
 using System;
+using System.IO;
 using System.Collections.Generic;
 using Microsoft.Spark.Sql;
 using Microsoft.Spark.Sql.Types;
+using System.Linq;
+using System.Threading;
+using Microsoft.Spark.Sql.Streaming;
 using static Microsoft.Spark.Sql.Functions;
+using System.Threading.Tasks;
 
 namespace Microsoft.Spark.Examples.Sql.Batch
 {
@@ -17,118 +22,277 @@ namespace Microsoft.Spark.Examples.Sql.Batch
     {
         public void Run(string[] args)
         {
-            if (args.Length != 1)
-            {
-                Console.Error.WriteLine(
-                    "Usage: Basic <path to SPARK_HOME/examples/src/main/resources/people.json>");
-                Environment.Exit(1);
-            }
-
             SparkSession spark = SparkSession
                 .Builder()
-                .AppName("SQL basic example using .NET for Apache Spark")
+                .AppName("SQL Datasource example using .NET for Apache Spark")
                 .Config("spark.some.config.option", "some-value")
                 .GetOrCreate();
 
-            // Need to explicitly specify the schema since pickling vs. arrow formatting
-            // will return different types. Pickling will turn longs into ints if the values fit.
-            // Same as the "age INT, name STRING" DDL-format string.
-            var inputSchema = new StructType(new[]
+            for (int i = 0; i < 10000; ++i)
             {
-                new StructField("age", new IntegerType()),
-                new StructField("name", new StringType())
-            });
-            DataFrame df = spark.Read().Schema(inputSchema).Json(args[0]);
+                // Temporary folder to put our test stream input.
+                using var srcTempDirectory = new TemporaryDirectory();
+                // Temporary folder to write ForeachBatch output.
+                using var dstTempDirectory = new TemporaryDirectory();
 
-            Spark.Sql.Types.StructType schema = df.Schema();
-            Console.WriteLine(schema.SimpleString);
+                Func<Column, Column> outerUdf = Udf<int, int>(i => i + 100);
 
-            IEnumerable<Row> rows = df.Collect();
-            foreach (Row row in rows)
-            {
-                Console.WriteLine(row);
+                // id column: [0, 1, ..., 9]
+                WriteCsv(0, 10, Path.Combine(srcTempDirectory.Path, "input1.csv"));
+
+                DataStreamWriter dsw = spark
+                    .ReadStream()
+                    .Schema("id INT")
+                    .Csv(srcTempDirectory.Path)
+                    .WriteStream()
+                    .ForeachBatch((df, id) =>
+                    {
+                        Console.WriteLine("ForeachBatch begin");
+                        //Func<Column, Column> innerUdf = Udf<int, int>(i => i + 200);
+                        //df.Select(outerUdf(innerUdf(Col("id"))))
+                        //    .Write()
+                        //    .Csv(Path.Combine(dstTempDirectory.Path, id.ToString()));
+                        for (int i = 0; i < 1000; ++i)
+                        {
+                            df.IsEmpty();
+                            GC.Collect();
+                        }
+                        //df.Write().Csv(Path.Combine(dstTempDirectory.Path, id.ToString()));
+                        Console.WriteLine("ForeachBatch end");
+                    });
+
+                StreamingQuery sq = dsw.Start();
+
+                // Process until all available data in the source has been processed and committed
+                // to the ForeachBatch sink. 
+                sq.ProcessAllAvailable();
+
+                // Add new file to the source path. The spark stream will read any new files
+                // added to the source path.
+                // id column: [10, 11, ..., 19]
+                WriteCsv(10, 10, Path.Combine(srcTempDirectory.Path, "input2.csv"));
+
+                // Process until all available data in the source has been processed and committed
+                // to the ForeachBatch sink.
+                sq.ProcessAllAvailable();
+                sq.Stop();
+
+                // Verify folders in the destination path.
+                //string[] csvPaths =
+                //    Directory.GetDirectories(dstTempDirectory.Path).OrderBy(s => s).ToArray();
+                //var expectedPaths = new string[]
+                //{
+                //Path.Combine(dstTempDirectory.Path, "0"),
+                //Path.Combine(dstTempDirectory.Path, "1"),
+                //};
+                //System.Diagnostics.Debug.Assert(expectedPaths.SequenceEqual(csvPaths));
+
+                // Read the generated csv paths and verify contents.
+                //DataFrame df = spark
+                //    .Read()
+                //    .Schema("id INT")
+                //    .Csv(csvPaths[0], csvPaths[1])
+                //    .Sort("id");
+
+                //IEnumerable<int> actualIds = df.Collect().Select(r => r.GetAs<int>("id"));
+                //System.Diagnostics.Debug.Assert(Enumerable.Range(300, 20).SequenceEqual(actualIds));
             }
 
-            df.Show();
+
+            //for (int j = 0; j < 10000; ++j)
+            //{
+            //    // Temporary folder to put our test stream input.
+            //    using var srcTempDirectory = new TemporaryDirectory();
+            //    // Temporary folder to write ForeachBatch output.
+            //    using var dstTempDirectory = new TemporaryDirectory();
+
+            //    Func<Column, Column> outerUdf = Udf<int, int>(i => i + 100);
+
+            //    // id column: [0, 1, ..., 9]
+            //    WriteCsv(0, 10, Path.Combine(srcTempDirectory.Path, "input1.csv"));
+
+            //    DataStreamWriter dsw = spark
+            //        .ReadStream()
+            //        .Schema("id INT")
+            //        .Csv(srcTempDirectory.Path)
+            //        .WriteStream()
+            //        .Format("console");
+
+            //    StreamingQuery sq = dsw.Start();
+
+            //    var tasks = new Task[2];
+            //    tasks[0] = Task.Run(() => DoWork(spark));
+
+            //    // Process until all available data in the source has been processed and committed
+            //    // to the ForeachBatch sink. 
+            //    tasks[1] = Task.Run(() => sq.ProcessAllAvailable());
+            //    Task.WaitAll(tasks);
+
+            //    // Add new file to the source path. The spark stream will read any new files
+            //    // added to the source path.
+            //    // id column: [10, 11, ..., 19]
+            //    WriteCsv(10, 10, Path.Combine(srcTempDirectory.Path, "input2.csv"));
+
+
+            //    // Process until all available data in the source has been processed and committed
+            //    // to the ForeachBatch sink. 
+            //    tasks[0] = Task.Run(() => sq.ProcessAllAvailable());
+            //    tasks[1] = Task.Run(() => DoWork(spark));
+            //    Task.WaitAll(tasks);
+            //    sq.Stop();
+            //}
+        }
+
+        private static void DoWork(SparkSession spark)
+        {
+            var data = new List<GenericRow>
+                    {
+                        new GenericRow(new object[] { "Alice", 20}),
+                        new GenericRow(new object[] { "Bob", 30})
+                    };
+            var schema = new StructType(new List<StructField>()
+                    {
+                        new StructField("name", new StringType()),
+                        new StructField("age", new IntegerType())
+                    });
+            DataFrame df = spark.CreateDataFrame(data, schema);
+
+            Column column = df["name"];
+            column = df["age"];
+
+            df.ToDF();
+            df.ToDF("name2", "age2");
+
+            StructType s = df.Schema();
 
             df.PrintSchema();
 
-            df.Select("name", "age", "age", "name").Show();
+            df.Explain();
+            df.Explain(true);
+            df.Explain(false);
 
-            df.Select(df["name"], df["age"] + 1).Show();
+            df.Show();
+            df.Show(10);
+            df.Show(10, 10);
+            df.Show(10, 10, true);
 
-            df.Filter(df["age"] > 21).Show();
+            DataFrame tempDF = df.ToJSON();
 
-            df.GroupBy("age")
-                .Agg(Avg(df["age"]), Avg(df["age"]), CountDistinct(df["age"], df["age"]))
-                .Show();
+            tempDF = df.Join(df);
+            tempDF = df.Join(df, "name");
+            tempDF = df.Join(df, new[] { "name" });
+            tempDF = df.Join(df, new[] { "name" }, "outer");
+            tempDF = df.Join(df, df["age"] == df["age"]);
+            tempDF = df.Join(df, df["age"] == df["age"], "outer");
 
-            df.CreateOrReplaceTempView("people");
+            tempDF = df.CrossJoin(df);
 
-            // Registering Udf for SQL expression.
-            DataFrame sqlDf = spark.Sql("SELECT * FROM people");
-            sqlDf.Show();
+            tempDF = df.SortWithinPartitions("age");
+            tempDF = df.SortWithinPartitions("age", "name");
+            tempDF = df.SortWithinPartitions();
+            tempDF = df.SortWithinPartitions(df["age"]);
+            tempDF = df.SortWithinPartitions(df["age"], df["name"]);
 
-            spark.Udf().Register<int?, string, string>(
-                "my_udf",
-                (age, name) => name + " with " + ((age.HasValue) ? age.Value.ToString() : "null"));
+            tempDF = df.Sort("age");
+            tempDF = df.Sort("age", "name");
+            tempDF = df.Sort();
+            tempDF = df.Sort(df["age"]);
+            tempDF = df.Sort(df["age"], df["name"]);
 
-            sqlDf = spark.Sql("SELECT my_udf(*) FROM people");
-            sqlDf.Show();
+            tempDF = df.OrderBy("age");
+            tempDF = df.OrderBy("age", "name");
+            tempDF = df.OrderBy();
+            tempDF = df.OrderBy(df["age"]);
+            tempDF = df.OrderBy(df["age"], df["name"]);
 
-            // Using UDF via data frames.
-            Func<Column, Column, Column> addition = Udf<int?, string, string>(
-                (age, name) => name + " is " + (age.HasValue ? age.Value + 10 : 0));
-            df.Select(addition(df["age"], df["name"])).Show();
+            tempDF = df.Hint("broadcast");
+            tempDF = df.Hint("broadcast", new[] { "hello", "world" });
 
-            // Chaining example:
-            Func<Column, Column> addition2 = Udf<string, string>(str => $"hello {str}!");
-            df.Select(addition2(addition(df["age"], df["name"]))).Show();
+            column = df.Col("age");
 
-            // Multiple UDF example:
-            df.Select(addition(df["age"], df["name"]), addition2(df["name"])).Show();
+            column = df.ColRegex("age");
 
-            // UDF return type as array.
-            Func<Column, Column> udfArray =
-                Udf<string, string[]>((str) => new[] { str, str + str });
-            df.Select(Explode(udfArray(df["name"]))).Show();
+            tempDF = df.As("alias");
 
-            // UDF return type as map.
-            Func<Column, Column> udfMap =
-                Udf<string, IDictionary<string, string[]>>(
-                    (str) => new Dictionary<string, string[]> { { str, new[] { str, str } } });
-            df.Select(udfMap(df["name"]).As("UdfMap")).Show(truncate: 50);
+            tempDF = df.Alias("alias");
 
-            // Joins.
-            DataFrame joinedDf = df.Join(df, "name");
-            joinedDf.Show();
+            tempDF = df.Select("age");
+            tempDF = df.Select("age", "name");
+            tempDF = df.Select();
+            tempDF = df.Select(df["age"]);
+            tempDF = df.Select(df["age"], df["name"]);
 
-            DataFrame joinedDf2 = df.Join(df, new[] { "name", "age" });
-            joinedDf2.Show();
+            tempDF = df.SelectExpr();
+            tempDF = df.SelectExpr("age * 2");
+            tempDF = df.SelectExpr("age * 2", "abs(age)");
 
-            DataFrame joinedDf3 = df.Join(df, df["name"] == df["name"], "outer");
-            joinedDf3.Show();
-            
-            // Union of two data frames
-            DataFrame unionDf = df.Union(df);
-            unionDf.Show();
+            tempDF = df.Filter(df["age"] > 21);
+            tempDF = df.Filter("age > 21");
 
-            // Add new column to data frame
-            df.WithColumn("location", Lit("Seattle")).Show();
+            tempDF = df.Where(df["age"] > 21);
+            tempDF = df.Where("age > 21");
+        }
 
-            // Rename existing column
-            df.WithColumnRenamed("name", "fullname").Show();
+        private void WriteCsv(int start, int count, string path)
+        {
+            using var streamWriter = new StreamWriter(path);
+            foreach (int i in Enumerable.Range(start, count))
+            {
+                streamWriter.WriteLine(i);
+            }
+        }
 
-            // Filter rows with null age
-            df.Filter(Col("age").IsNull()).Show();
 
-            // Fill null values in age column with -1
-            df.Na().Fill(-1, new[] { "age" }).Show();
 
-            // Drop age column
-            df.Drop(new[] { "age" }).Show();
+        internal sealed class TemporaryDirectory : IDisposable
+        {
+            private bool _disposed = false;
 
-            spark.Stop();
+            /// <summary>
+            /// Path to temporary folder.
+            /// </summary>
+            public string Path { get; }
+
+            public TemporaryDirectory()
+            {
+                Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), Guid.NewGuid().ToString());
+                Cleanup();
+                Directory.CreateDirectory(Path);
+                Path = $"{Path}{System.IO.Path.DirectorySeparatorChar}";
+            }
+
+            public void Dispose()
+            {
+                Dispose(true);
+                GC.SuppressFinalize(this);
+            }
+
+            private void Cleanup()
+            {
+                if (File.Exists(Path))
+                {
+                    File.Delete(Path);
+                }
+                else if (Directory.Exists(Path))
+                {
+                    Directory.Delete(Path, true);
+                }
+            }
+
+            private void Dispose(bool disposing)
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                if (disposing)
+                {
+                    Cleanup();
+                }
+
+                _disposed = true;
+            }
         }
     }
 }

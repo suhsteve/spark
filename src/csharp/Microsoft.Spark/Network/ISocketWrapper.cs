@@ -5,6 +5,7 @@
 using System;
 using System.IO;
 using System.Net;
+using System.Net.Sockets;
 
 namespace Microsoft.Spark.Network
 {
@@ -18,6 +19,9 @@ namespace Microsoft.Spark.Network
         /// </summary>
         /// <returns>A ISocket instance used to send and receive data</returns>
         ISocketWrapper Accept();
+
+
+        Socket InnerSocket { get; }
 
         /// <summary>
         /// Establishes a connection to a remote host that is specified by an IP address and

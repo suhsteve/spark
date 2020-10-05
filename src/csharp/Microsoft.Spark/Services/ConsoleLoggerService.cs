@@ -3,6 +3,7 @@
 // See the LICENSE file in the project root for more information.
 
 using System;
+using System.Threading;
 
 namespace Microsoft.Spark.Services
 {
@@ -145,11 +146,12 @@ namespace Microsoft.Spark.Services
         private void Log(string level, string message)
         {
             Console.WriteLine(
-                "[{0}] [{1}] [{2}] [{3}] {4}",
+                "[{0}] [{1}] [{2}] [{3}] [{4}] {5}",
                 DateTime.UtcNow.ToString("o"),
                 Environment.MachineName,
                 level,
                 _type.Name,
+                Thread.CurrentThread.ManagedThreadId,
                 message);
         }
     }

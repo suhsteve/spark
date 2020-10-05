@@ -264,6 +264,8 @@ namespace Microsoft.Spark.E2ETest.IpcTests
             Assert.Equal(
                 expectedOutput.Select(i => new object[] { i }),
                 foreachWriterOutputDF.Collect().Select(r => r.Values));
+            DataFrame input = _spark.Sql("SELECT array('hello', 'I', 'AM', 'a', 'string', 'TO', " +
+                "'TOKENIZE') as input from range(100)");
         }
 
         private void WriteCsv(int start, int count, string path)

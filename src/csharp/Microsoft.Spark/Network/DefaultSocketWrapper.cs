@@ -52,6 +52,10 @@ namespace Microsoft.Spark.Network
         /// </summary>
         public void Dispose()
         {
+            _outputStream?.Close();
+            _inputStream?.Close();
+            _innerSocket.Close();
+
             _outputStream?.Dispose();
             _inputStream?.Dispose();
             _innerSocket.Dispose();
@@ -140,5 +144,7 @@ namespace Microsoft.Spark.Network
         /// Returns the remote endpoint.
         /// </summary>
         public EndPoint RemoteEndPoint => _innerSocket.RemoteEndPoint;
+
+        public Socket InnerSocket => _innerSocket;
     }
 }
